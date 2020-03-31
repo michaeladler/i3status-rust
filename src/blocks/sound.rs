@@ -60,17 +60,28 @@ trait SoundDevice {
 }
 
 struct AlsaSoundDevice {
-    name: String,
+    card: Option<String>,
+    mixer: String,
     volume: u32,
     muted: bool,
 }
 
 impl AlsaSoundDevice {
     fn new(name: String) -> Result<Self> {
-        let mut sd = AlsaSoundDevice {
-            name,
-            volume: 0,
-            muted: false,
+        let parts: Vec<&str> = name.split('/').collect();
+        let mut sd = match parts[..] {
+            [card, mixer] => AlsaSoundDevice {
+                card: Some(String::from(card)),
+                mixer: String::from(mixer),
+                volume: 0,
+                muted: false,
+            },
+            _ => AlsaSoundDevice {
+                card: None,
+                mixer: name,
+                volume: 0,
+                muted: false,
+            },
         };
         sd.get_info()?;
 
@@ -87,8 +98,12 @@ impl SoundDevice for AlsaSoundDevice {
     }
 
     fn get_info(&mut self) -> Result<()> {
-        let output = Command::new("amixer")
-            .args(&["get", &self.name])
+        let mut cmd = Command::new("amixer");
+        if let Some(card) = &self.card {
+            cmd.args(&["--card", &card]);
+        }
+        let output = cmd
+            .args(&["get", &self.mixer])
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
             .block_error("sound", "could not run amixer to get sound info")?;
@@ -118,8 +133,11 @@ impl SoundDevice for AlsaSoundDevice {
     fn set_volume(&mut self, step: i32) -> Result<()> {
         let volume = max(0, self.volume as i32 + step) as u32;
 
-        Command::new("amixer")
-            .args(&["set", &self.name, &format!("{}%", volume)])
+        let mut cmd = Command::new("amixer");
+        if let Some(card) = &self.card {
+            cmd.args(&["--card", &card]);
+        }
+        cmd.args(&["set", &self.mixer, &format!("{}%", volume)])
             .output()
             .block_error("sound", "failed to set volume")?;
 
@@ -129,8 +147,11 @@ impl SoundDevice for AlsaSoundDevice {
     }
 
     fn toggle(&mut self) -> Result<()> {
-        Command::new("amixer")
-            .args(&["set", &self.name, "toggle"])
+        let mut cmd = Command::new("amixer");
+        if let Some(card) = &self.card {
+            cmd.args(&["--card", &card]);
+        }
+        cmd.args(&["set", &self.mixer, "toggle"])
             .output()
             .block_error("sound", "failed to toggle mute")?;
 
