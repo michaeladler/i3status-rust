@@ -52,6 +52,7 @@ use uuid::Uuid;
 trait SoundDevice {
     fn volume(&self) -> u32;
     fn muted(&self) -> bool;
+    fn identifier(&self) -> &Option<String>;
 
     fn get_info(&mut self) -> Result<()>;
     fn set_volume(&mut self, step: i32) -> Result<()>;
@@ -95,6 +96,9 @@ impl SoundDevice for AlsaSoundDevice {
     }
     fn muted(&self) -> bool {
         self.muted
+    }
+    fn identifier(&self) -> &Option<String> {
+        &self.card
     }
 
     fn get_info(&mut self) -> Result<()> {
@@ -513,6 +517,9 @@ impl SoundDevice for PulseAudioSoundDevice {
     fn muted(&self) -> bool {
         self.muted
     }
+    fn identifier(&self) -> &Option<String> {
+        &None
+    }
 
     fn get_info(&mut self) -> Result<()> {
         match PULSEAUDIO_SINKS.lock().unwrap().get(&self.name()) {
@@ -656,14 +663,25 @@ impl Sound {
                 .block_error("sound", "cannot find icon")?
                 .to_owned();
             if self.show_volume_when_muted {
-                if self.bar {
-                    self.text
-                        .set_text(format!("{} {}", icon, format_percent_bar(volume as f32)));
-                } else {
-                    self.text.set_text(format!("{} {:02}%", icon, volume));
-                }
+                self.text
+                    .set_text(match (self.device.identifier(), self.bar) {
+                        (Some(identifier), true) => format!(
+                            "{} {} {}",
+                            identifier,
+                            icon,
+                            format_percent_bar(volume as f32)
+                        ),
+                        (Some(identifier), false) => {
+                            format!("{} {} {:02}%", identifier, icon, volume)
+                        }
+                        (None, true) => format!("{} {}", icon, format_percent_bar(volume as f32)),
+                        (None, false) => format!("{} {:02}%", icon, volume),
+                    });
             } else {
-                self.text.set_text(icon);
+                self.text.set_text(match self.device.identifier() {
+                    Some(identifier) => format!("{} {}", identifier, icon),
+                    None => icon,
+                });
             }
             self.text.set_state(State::Warning);
         } else {
@@ -672,11 +690,15 @@ impl Sound {
                 21..=70 => "volume_half",
                 _ => "volume_full",
             });
-            self.text.set_text(if self.bar {
-                format_percent_bar(volume as f32)
-            } else {
-                format!("{:02}%", volume)
-            });
+            self.text
+                .set_text(match (self.device.identifier(), self.bar) {
+                    (Some(identifier), true) => {
+                        format!("{} {}", identifier, format_percent_bar(volume as f32))
+                    }
+                    (Some(identifier), false) => format!("{} {:02}%", identifier, volume),
+                    (None, true) => format_percent_bar(volume as f32),
+                    (None, false) => format!("{:02}%", volume),
+                });
             self.text.set_state(State::Idle);
         }
 
